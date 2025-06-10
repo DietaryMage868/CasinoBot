@@ -156,7 +156,7 @@ bot.command('checkdeposit', async (ctx: any) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const DOMAIN = process.env.RENDER_EXTERNAL_URL;
 
 (async () => {
@@ -171,7 +171,9 @@ const DOMAIN = process.env.RENDER_EXTERNAL_URL;
   if (DOMAIN) {
     await bot.launch({
       webhook: {
+        // Render проксирует все запросы на /, поэтому hookPath — '/'
         domain: DOMAIN,
+        hookPath: '/',
         port: PORT
       }
     });
