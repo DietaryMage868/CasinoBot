@@ -64,8 +64,8 @@ bot.on('callback_query', async (ctx: any) => {
       const isEven = dice % 2 === 0;
       const win = (isEven && data === 'even') || (!isEven && data === 'odd');
       if (win) {
-        db.run('UPDATE users SET balance = balance * 1.5 WHERE id = ?', [userId]);
-        ctx.reply(`${diceEmojis[dice-1]} (${dice})\nПоздравляем! Вы выиграли x1.5 от баланса!`);
+        db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [bet * 1.5, userId]);
+        ctx.reply(`${diceEmojis[dice-1]} (${dice})\nПоздравляем! Вы выиграли x1.5 от ставки!`);
       } else {
         ctx.reply(`${diceEmojis[dice-1]} (${dice})\nУвы, не угадали.`);
       }
@@ -78,8 +78,8 @@ bot.on('callback_query', async (ctx: any) => {
       const dice = diceMsg.dice.value;
       const diceEmojis = ['⚀','⚁','⚂','⚃','⚄','⚅'];
       if (userNum === dice) {
-        db.run('UPDATE users SET balance = balance * 3 WHERE id = ?', [userId]);
-        ctx.reply(`${diceEmojis[dice-1]} (${dice})\nПоздравляем! Вы выиграли x3 от баланса!`);
+        db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [bet * 3, userId]);
+        ctx.reply(`${diceEmojis[dice-1]} (${dice})\nПоздравляем! Вы выиграли x3 от ставки!`);
       } else {
         ctx.reply(`${diceEmojis[dice-1]} (${dice})\nУвы, не угадали.`);
       }
