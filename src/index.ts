@@ -114,17 +114,28 @@ bot.on('text', async (ctx: any) => {
     ctx.reply('Введите корректную сумму ставки (число больше 0).');
     return;
   }
-  ctx.session.bet = bet;
-  ctx.session.awaitingBet = undefined;
-  if (awaiting === 'evenOdd') {
-    ctx.reply('Выберите:', Markup.inlineKeyboard([
-      [Markup.button.callback('Чётное', 'even'), Markup.button.callback('Нечётное', 'odd')]
-    ]));
-  } else if (awaiting === 'number') {
-    ctx.reply('Выберите число от 1 до 6:', Markup.inlineKeyboard([
-      [1,2,3,4,5,6].map(n => Markup.button.callback(n.toString(), `num_${n}`))
-    ]));
-  }
+
+  // Проверяем баланс пользователя
+  const userId = ctx.from?.id;
+  db.get('SELECT balance FROM users WHERE id = ?', [userId], (err: any, row: any) => {
+    if (!row || row.balance < bet) {
+      ctx.reply('Недостаточно средств для ставки!');
+      return;
+    }
+    // Списываем ставку с баланса
+    db.run('UPDATE users SET balance = balance - ? WHERE id = ?', [bet, userId]);
+    ctx.session.bet = bet;
+    ctx.session.awaitingBet = undefined;
+    if (awaiting === 'evenOdd') {
+      ctx.reply('Выберите:', Markup.inlineKeyboard([
+        [Markup.button.callback('Чётное', 'even'), Markup.button.callback('Нечётное', 'odd')]
+      ]));
+    } else if (awaiting === 'number') {
+      ctx.reply('Выберите число от 1 до 6:', Markup.inlineKeyboard([
+        [1,2,3,4,5,6].map(n => Markup.button.callback(n.toString(), `num_${n}`))
+      ]));
+    }
+  });
 });
 
 async function checkTonDeposit(userId: number, username: string) {
