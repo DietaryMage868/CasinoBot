@@ -1,16 +1,18 @@
 // Основной файл Telegram-казино-бота
-import { Telegraf, Markup } from 'telegraf';
+import { Telegraf, Markup, session } from 'telegraf';
 import path from 'path';
 import { evenOddGame, numberGame, handleEvenOddResult, handleNumberResult } from './games';
 import axios from 'axios';
 
-// Все секреты и ключи берём из переменных окружения!
-const BOT_TOKEN = process.env.BOT_TOKEN!;
-const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS!; // Можно задать в Render, если нужно менять
-const TON_WALLET = process.env.TON_WALLET!; // Можно задать в Render, если нужно менять
-const TONAPI_KEY = process.env.TONAPI_KEY!;
+// Секреты лучше брать из process.env, но если тестируете — оставьте как есть
+const BOT_TOKEN = process.env.BOT_TOKEN || '7725310107:AAEzkOaYJYc-TpUV-VxR__LRnIe_4zbZjVU';
+const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS || 'UQDOSJdPi0iGP0638uZ6hflv45FbMveyYvw36rhuKmO-Fptd';
+const TON_WALLET = process.env.TON_WALLET || 'UQDOSJdPi0iGP0638uZ6hflv45FbMveyYvw36rhuKmO-Fptd';
+const TONAPI_KEY = process.env.TONAPI_KEY || 'ВАШ_TONAPI_KEY';
 
 const bot = new Telegraf(BOT_TOKEN);
+bot.use(session()); // обязательно для работы ставок!
+
 const dbPath = path.resolve(__dirname, '../casino.db');
 const sqlite3 = require('sqlite3').verbose();
 let db = new sqlite3.Database(dbPath);
@@ -32,9 +34,7 @@ bot.start(async (ctx: any) => {
 });
 
 bot.command('deposit', (ctx: any) => {
-  ctx.reply(
-    `Для пополнения баланса переведите TON на адрес:\n${TON_DEPOSIT_ADDRESS}\n\nВ комментарии к переводу укажите свой Telegram username или user id. После перевода используйте /checkdeposit для зачисления.`
-  );
+  ctx.reply(`Для пополнения баланса переведите TON на адрес:\n${TON_DEPOSIT_ADDRESS}\n\nВ комментарии к переводу укажите свой Telegram username или user id. После перевода используйте /checkdeposit для зачисления.`);
 });
 
 bot.command('balance', (ctx: any) => {
@@ -50,20 +50,40 @@ bot.command('games', (ctx: any) => {
 
 bot.command('evenodd', (ctx: any) => evenOddGame(ctx, db));
 bot.command('number', (ctx: any) => numberGame(ctx, db));
-bot.command('myid', (ctx: any) => {
-  ctx.reply(`Ваш user id: ${ctx.from?.id}`);
-});
 
 // Обработка нажатий на кнопки для even/odd и number
 bot.on('callback_query', async (ctx: any) => {
   const userId = ctx.from?.id;
   const data = ctx.callbackQuery.data;
   if (data === 'even' || data === 'odd') {
-    require('./games').handleEvenOddResult(ctx, db, data);
+    // Кидаем кость в чат через replyWithDice (гарантированно работает в приватных и группах)
+    const diceMsg = await ctx.replyWithDice('🎲');
+    setTimeout(() => {
+      const dice = diceMsg.dice.value;
+      const diceEmojis = ['⚀','⚁','⚂','⚃','⚄','⚅'];
+      const isEven = dice % 2 === 0;
+      const win = (isEven && data === 'even') || (!isEven && data === 'odd');
+      if (win) {
+        db.run('UPDATE users SET balance = balance * 1.5 WHERE id = ?', [userId]);
+        ctx.reply(`${diceEmojis[dice-1]} (${dice})\nПоздравляем! Вы выиграли x1.5 от баланса!`);
+      } else {
+        ctx.reply(`${diceEmojis[dice-1]} (${dice})\nУвы, не угадали.`);
+      }
+    }, 3000);
   }
   if (data && data.startsWith('num_')) {
-    const num = parseInt(data.replace('num_', ''));
-    require('./games').handleNumberResult(ctx, db, num);
+    const userNum = parseInt(data.replace('num_', ''));
+    const diceMsg = await ctx.replyWithDice('🎲');
+    setTimeout(() => {
+      const dice = diceMsg.dice.value;
+      const diceEmojis = ['⚀','⚁','⚂','⚃','⚄','⚅'];
+      if (userNum === dice) {
+        db.run('UPDATE users SET balance = balance * 3 WHERE id = ?', [userId]);
+        ctx.reply(`${diceEmojis[dice-1]} (${dice})\nПоздравляем! Вы выиграли x3 от баланса!`);
+      } else {
+        ctx.reply(`${diceEmojis[dice-1]} (${dice})\nУвы, не угадали.`);
+      }
+    }, 3000);
   }
   ctx.answerCbQuery();
 });
@@ -136,19 +156,30 @@ bot.command('checkdeposit', async (ctx: any) => {
   }
 });
 
+const PORT = process.env.PORT || 3000;
+const DOMAIN = process.env.RENDER_EXTERNAL_URL;
+
 (async () => {
   initDB();
-  // Добавляем меню команд для Telegram
   await bot.telegram.setMyCommands([
     { command: 'start', description: 'Запустить бота' },
     { command: 'balance', description: 'Показать баланс' },
     { command: 'games', description: 'Список игр' },
     { command: 'deposit', description: 'Пополнить баланс' },
-    { command: 'checkdeposit', description: 'Проверить депозит' },
-    { command: 'myid', description: 'Показать user id' }
+    { command: 'checkdeposit', description: 'Проверить депозит' }
   ]);
-  bot.launch();
-  console.log('Bot started');
+  if (DOMAIN) {
+    await bot.launch({
+      webhook: {
+        domain: DOMAIN,
+        port: PORT
+      }
+    });
+    console.log(`Bot started in webhook mode on ${DOMAIN}`);
+  } else {
+    await bot.launch();
+    console.log('Bot started in polling mode');
+  }
 })();
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
