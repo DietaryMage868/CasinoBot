@@ -55,8 +55,10 @@ bot.command('number', (ctx: any) => numberGame(ctx, db));
 bot.on('callback_query', async (ctx: any) => {
   const userId = ctx.from?.id;
   const data = ctx.callbackQuery.data;
+  // Получаем ставку из сессии
+  const bet = ctx.session?.bet || 0;
+
   if (data === 'even' || data === 'odd') {
-    // Кидаем кость в чат через replyWithDice (гарантированно работает в приватных и группах)
     const diceMsg = await ctx.replyWithDice('🎲');
     setTimeout(() => {
       const dice = diceMsg.dice.value;
@@ -69,6 +71,8 @@ bot.on('callback_query', async (ctx: any) => {
       } else {
         ctx.reply(`${diceEmojis[dice-1]} (${dice})\nУвы, не угадали.`);
       }
+      // Очищаем ставку после игры
+      ctx.session.bet = undefined;
     }, 3000);
   }
   if (data && data.startsWith('num_')) {
@@ -83,6 +87,7 @@ bot.on('callback_query', async (ctx: any) => {
       } else {
         ctx.reply(`${diceEmojis[dice-1]} (${dice})\nУвы, не угадали.`);
       }
+      ctx.session.bet = undefined;
     }, 3000);
   }
   ctx.answerCbQuery();
