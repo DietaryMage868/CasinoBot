@@ -4,12 +4,13 @@ import path from 'path';
 import { evenOddGame, numberGame, handleEvenOddResult, handleNumberResult } from './games';
 import axios from 'axios';
 import fs from 'fs';
+import { generateCasinoReport } from './db_report';
 
 // Секреты лучше брать из process.env, но если тестируете — оставьте как есть
-const BOT_TOKEN = process.env.BOT_TOKEN || '7725310107:AAEzkOaYJYc-TpUV-VxR__LRnIe_4zbZjVU';
-const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS || 'UQDOSJdPi0iGP0638uZ6hflv45FbMveyYvw36rhuKmO-Fptd';
-const TON_WALLET = process.env.TON_WALLET || 'UQDOSJdPi0iGP0638uZ6hflv45FbMveyYvw36rhuKmO-Fptd';
-const TONAPI_KEY = process.env.TONAPI_KEY || 'ВАШ_TONAPI_KEY';
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS;
+const TON_WALLET = process.env.TON_WALLET;
+const TONAPI_KEY = process.env.TONAPI_KEY;
 
 const bot = new Telegraf(BOT_TOKEN);
 bot.use(session()); // обязательно для работы ставок!
@@ -213,6 +214,21 @@ bot.command('checkdeposit', async (ctx: any) => {
     ctx.reply(`Депозит успешно зачислен: +${amount} TON!`);
   } else {
     ctx.reply('Депозит не найден. Убедитесь, что вы указали свой user id или username в комментарии к переводу и попробуйте позже.');
+  }
+});
+
+const OWNER_USERNAME = 'Dietarymage868'; // без @
+
+bot.command('report', async (ctx: any) => {
+  if ((ctx.from?.username || '').toLowerCase() !== OWNER_USERNAME.toLowerCase()) {
+    // Просто игнорируем команду для всех, кроме владельца
+    return;
+  }
+  try {
+    const filePath = await generateCasinoReport();
+    await ctx.replyWithDocument({ source: filePath, filename: 'casino_report.txt' });
+  } catch (e) {
+    ctx.reply('Ошибка при формировании отчёта: ' + e);
   }
 });
 
