@@ -4,16 +4,18 @@
   "description": "Telegram casino bot with TON deposit, slot, dice, and number games. Ready for CodeSandbox.",
   "main": "src/index.ts",
   "dependencies": {
-  "telegraf": "^4.12.2",
-  "axios": "^1.9.0",
-  "sqlite3": "^5.1.6"
-},
-"devDependencies": {
-  "typescript": "^5.4.5",
-  "@types/node": "^20.17.57"
-},
+    "axios": "^1.9.0",
+    "sqlite3": "^5.1.6",
+    "telegraf": "^4.12.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.57",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  },
   "scripts": {
-  "build": "tsc",
-  "start": "node dist/index.js"
-}
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev src/index.ts"
+  }
 }

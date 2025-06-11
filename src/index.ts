@@ -3,12 +3,13 @@ import { Telegraf, Markup, session } from 'telegraf';
 import path from 'path';
 import { evenOddGame, numberGame, handleEvenOddResult, handleNumberResult } from './games';
 import axios from 'axios';
+import fs from 'fs';
 
 // Секреты лучше брать из process.env, но если тестируете — оставьте как есть
 const BOT_TOKEN = process.env.BOT_TOKEN || '7725310107:AAEzkOaYJYc-TpUV-VxR__LRnIe_4zbZjVU';
 const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS || 'UQDOSJdPi0iGP0638uZ6hflv45FbMveyYvw36rhuKmO-Fptd';
 const TON_WALLET = process.env.TON_WALLET || 'UQDOSJdPi0iGP0638uZ6hflv45FbMveyYvw36rhuKmO-Fptd';
-const TONAPI_KEY = process.env.TONAPI_KEY || 'AFPL5CD5Z7A23UQAAAAAKUVSYV7JGMBFPVYJTEMUCUM3PTTBPNZRD44BZXP4DKJVYO7PYZA';
+const TONAPI_KEY = process.env.TONAPI_KEY || 'ВАШ_TONAPI_KEY';
 
 const bot = new Telegraf(BOT_TOKEN);
 bot.use(session()); // обязательно для работы ставок!
@@ -23,6 +24,13 @@ function initDB() {
     username TEXT,
     balance REAL DEFAULT 0,
     last_tx TEXT
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS deposits (
+    tx_hash TEXT PRIMARY KEY,
+    user_id INTEGER,
+    username TEXT,
+    amount REAL,
+    timestamp INTEGER
   )`);
 }
 
@@ -139,26 +147,62 @@ bot.on('text', async (ctx: any) => {
 });
 
 async function checkTonDeposit(userId: number, username: string) {
-  // Получаем последние входящие транзакции
-  const url = `https://tonapi.io/v2/blockchain/accounts/${TON_WALLET}/transactions?limit=20`;
-  const res = await axios.get(url, { headers: { Authorization: `Bearer ${TONAPI_KEY}` } });
-  const txs = res.data.transactions;
-  // Ищем перевод с userId или username в payload (комментарии)
-  for (const tx of txs) {
-    if (tx.in_msg && tx.in_msg.comment && (tx.in_msg.comment.includes(userId.toString()) || (username && tx.in_msg.comment.includes(username)))) {
-      // Проверяем, не был ли уже зачислен этот tx
-      const exists = await new Promise(resolve => {
-        db.get('SELECT 1 FROM users WHERE id = ? AND last_tx = ?', [userId, tx.hash], (err: any, row: any) => resolve(!!row));
-      });
-      if (!exists) {
-        // Зачисляем сумму (TON приходит в nanoTON)
-        const amount = tx.in_msg.value / 1e9;
-        db.run('UPDATE users SET balance = balance + ?, last_tx = ? WHERE id = ?', [amount, tx.hash, userId]);
-        return amount;
+  try {
+    const url = `https://tonapi.io/v2/blockchain/accounts/${TON_WALLET}/transactions?limit=20`;
+    const res = await axios.get(url, { headers: { Authorization: `Bearer ${TONAPI_KEY}` } });
+    const txs = res.data.transactions;
+    let found = false;
+
+    for (const tx of txs) {
+      if (!tx.in_msg || !tx.in_msg.comment) continue;
+      const comment = tx.in_msg.comment;
+      // Проверяем по userId, username и @username
+      if (
+        comment.includes(userId.toString()) ||
+        (username && (comment.includes(username) || comment.includes('@' + username)))
+      ) {
+        // Проверяем, не был ли уже зачислен этот tx
+        const exists = await new Promise(resolve => {
+          db.get('SELECT 1 FROM deposits WHERE tx_hash = ?', [tx.hash], (err: any, row: any) => resolve(!!row));
+        });
+        if (!exists) {
+          const amount = tx.in_msg.value / 1e9;
+          db.run('UPDATE users SET balance = balance + ?, last_tx = ? WHERE id = ?', [amount, tx.hash, userId]);
+          db.run('INSERT INTO deposits (tx_hash, user_id, username, amount, timestamp) VALUES (?, ?, ?, ?, ?)', [
+            tx.hash, userId, username, amount, tx.utime
+          ]);
+          found = true;
+          return amount;
+        }
       }
     }
+
+    // Если не найдено — ищем "висящие" депозиты и сохраняем их в файл
+    const unclaimed: any[] = [];
+    for (const tx of txs) {
+      if (!tx.in_msg || !tx.in_msg.comment) continue;
+      // Проверяем, не был ли уже зачислен этот tx
+      const exists = await new Promise(resolve => {
+        db.get('SELECT 1 FROM deposits WHERE tx_hash = ?', [tx.hash], (err: any, row: any) => resolve(!!row));
+      });
+      if (!exists) {
+        unclaimed.push({
+          tx_hash: tx.hash,
+          comment: tx.in_msg.comment,
+          amount: tx.in_msg.value / 1e9,
+          timestamp: tx.utime
+        });
+      }
+    }
+    if (unclaimed.length > 0) {
+      fs.writeFileSync('unclaimed_deposits.json', JSON.stringify(unclaimed, null, 2), 'utf-8');
+    }
+
+    return 0;
+  } catch (e) {
+    console.error('Ошибка при проверке депозита:', e);
+    return 0;
   }
-  return 0;
 }
 
 bot.command('checkdeposit', async (ctx: any) => {
