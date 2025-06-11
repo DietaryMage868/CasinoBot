@@ -8,7 +8,7 @@ import axios from 'axios';
 const BOT_TOKEN = process.env.BOT_TOKEN || '7725310107:AAEzkOaYJYc-TpUV-VxR__LRnIe_4zbZjVU';
 const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS || 'UQDOSJdPi0iGP0638uZ6hflv45FbMveyYvw36rhuKmO-Fptd';
 const TON_WALLET = process.env.TON_WALLET || 'UQDOSJdPi0iGP0638uZ6hflv45FbMveyYvw36rhuKmO-Fptd';
-const TONAPI_KEY = process.env.TONAPI_KEY || 'ВАШ_TONAPI_KEY';
+const TONAPI_KEY = process.env.TONAPI_KEY || 'AFPL5CD5Z7A23UQAAAAAKUVSYV7JGMBFPVYJTEMUCUM3PTTBPNZRD44BZXP4DKJVYO7PYZA';
 
 const bot = new Telegraf(BOT_TOKEN);
 bot.use(session()); // обязательно для работы ставок!
