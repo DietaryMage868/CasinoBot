@@ -4,13 +4,12 @@ import path from 'path';
 import { evenOddGame, numberGame, handleEvenOddResult, handleNumberResult } from './games';
 import axios from 'axios';
 import fs from 'fs';
-import { generateCasinoReport } from './db_report';
 
-// Секреты лучше брать из process.env, но если тестируете — оставьте как есть
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS;
-const TON_WALLET = process.env.TON_WALLET;
-const TONAPI_KEY = process.env.TONAPI_KEY;
+if (!BOT_TOKEN) throw new Error('BOT_TOKEN is not set!');
+const TON_DEPOSIT_ADDRESS = process.env.TON_DEPOSIT_ADDRESS || '';
+const TON_WALLET = process.env.TON_WALLET || '';
+const TONAPI_KEY = process.env.TONAPI_KEY || '';
 
 const bot = new Telegraf(BOT_TOKEN);
 bot.use(session()); // обязательно для работы ставок!
@@ -24,7 +23,9 @@ function initDB() {
     id INTEGER PRIMARY KEY,
     username TEXT,
     balance REAL DEFAULT 0,
-    last_tx TEXT
+    last_tx TEXT,
+    wins INTEGER DEFAULT 0,
+    losses INTEGER DEFAULT 0
   )`);
   db.run(`CREATE TABLE IF NOT EXISTS deposits (
     tx_hash TEXT PRIMARY KEY,
@@ -33,6 +34,9 @@ function initDB() {
     amount REAL,
     timestamp INTEGER
   )`);
+  // Добавим новые поля если их нет
+  db.run(`ALTER TABLE users ADD COLUMN wins INTEGER DEFAULT 0`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN losses INTEGER DEFAULT 0`, () => {});
 }
 
 bot.start(async (ctx: any) => {
@@ -64,7 +68,6 @@ bot.command('number', (ctx: any) => numberGame(ctx, db));
 bot.on('callback_query', async (ctx: any) => {
   const userId = ctx.from?.id;
   const data = ctx.callbackQuery.data;
-  // Получаем ставку из сессии
   const bet = ctx.session?.bet || 0;
 
   if (data === 'even' || data === 'odd') {
@@ -75,12 +78,12 @@ bot.on('callback_query', async (ctx: any) => {
       const isEven = dice % 2 === 0;
       const win = (isEven && data === 'even') || (!isEven && data === 'odd');
       if (win) {
-        db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [bet * 1.5, userId]);
+        db.run('UPDATE users SET balance = balance + ?, wins = wins + 1 WHERE id = ?', [bet * 1.5, userId]);
         ctx.reply(`${diceEmojis[dice-1]} (${dice})\nПоздравляем! Вы выиграли x1.5 от ставки!`);
       } else {
+        db.run('UPDATE users SET losses = losses + 1 WHERE id = ?', [userId]);
         ctx.reply(`${diceEmojis[dice-1]} (${dice})\nУвы, не угадали.`);
       }
-      // Очищаем ставку после игры
       ctx.session.bet = undefined;
     }, 3000);
   }
@@ -91,9 +94,10 @@ bot.on('callback_query', async (ctx: any) => {
       const dice = diceMsg.dice.value;
       const diceEmojis = ['⚀','⚁','⚂','⚃','⚄','⚅'];
       if (userNum === dice) {
-        db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [bet * 3, userId]);
+        db.run('UPDATE users SET balance = balance + ?, wins = wins + 1 WHERE id = ?', [bet * 3, userId]);
         ctx.reply(`${diceEmojis[dice-1]} (${dice})\nПоздравляем! Вы выиграли x3 от ставки!`);
       } else {
+        db.run('UPDATE users SET losses = losses + 1 WHERE id = ?', [userId]);
         ctx.reply(`${diceEmojis[dice-1]} (${dice})\nУвы, не угадали.`);
       }
       ctx.session.bet = undefined;
@@ -124,14 +128,12 @@ bot.on('text', async (ctx: any) => {
     return;
   }
 
-  // Проверяем баланс пользователя
   const userId = ctx.from?.id;
   db.get('SELECT balance FROM users WHERE id = ?', [userId], (err: any, row: any) => {
     if (!row || row.balance < bet) {
       ctx.reply('Недостаточно средств для ставки!');
       return;
     }
-    // Списываем ставку с баланса
     db.run('UPDATE users SET balance = balance - ? WHERE id = ?', [bet, userId]);
     ctx.session.bet = bet;
     ctx.session.awaitingBet = undefined;
@@ -157,12 +159,10 @@ async function checkTonDeposit(userId: number, username: string) {
     for (const tx of txs) {
       if (!tx.in_msg || !tx.in_msg.comment) continue;
       const comment = tx.in_msg.comment;
-      // Проверяем по userId, username и @username
       if (
         comment.includes(userId.toString()) ||
         (username && (comment.includes(username) || comment.includes('@' + username)))
       ) {
-        // Проверяем, не был ли уже зачислен этот tx
         const exists = await new Promise(resolve => {
           db.get('SELECT 1 FROM deposits WHERE tx_hash = ?', [tx.hash], (err: any, row: any) => resolve(!!row));
         });
@@ -182,7 +182,6 @@ async function checkTonDeposit(userId: number, username: string) {
     const unclaimed: any[] = [];
     for (const tx of txs) {
       if (!tx.in_msg || !tx.in_msg.comment) continue;
-      // Проверяем, не был ли уже зачислен этот tx
       const exists = await new Promise(resolve => {
         db.get('SELECT 1 FROM deposits WHERE tx_hash = ?', [tx.hash], (err: any, row: any) => resolve(!!row));
       });
@@ -219,17 +218,23 @@ bot.command('checkdeposit', async (ctx: any) => {
 
 const OWNER_USERNAME = 'Dietarymage868'; // без @
 
-bot.command('report', async (ctx: any) => {
+// Команда /db — дешифровщик базы для владельца
+bot.command('db', async (ctx: any) => {
   if ((ctx.from?.username || '').toLowerCase() !== OWNER_USERNAME.toLowerCase()) {
-    // Просто игнорируем команду для всех, кроме владельца
     return;
   }
-  try {
-    const filePath = await generateCasinoReport();
-    await ctx.replyWithDocument({ source: filePath, filename: 'casino_report.txt' });
-  } catch (e) {
-    ctx.reply('Ошибка при формировании отчёта: ' + e);
-  }
+  db.all('SELECT id, username, balance, wins, losses FROM users', [], (err: any, rows: any[]) => {
+    if (err) {
+      ctx.reply('Ошибка чтения базы');
+      return;
+    }
+    let text = `#  | Ник         | ID         | Баланс | Побед | Пораж\n`;
+    text += `---|-------------|------------|--------|-------|------\n`;
+    rows.forEach((u, i) => {
+      text += `${i+1} | ${u.username || '-'} | ${u.id} | ${u.balance} | ${u.wins} | ${u.losses}\n`;
+    });
+    ctx.reply('```\n' + text + '```', { parse_mode: 'Markdown' });
+  });
 });
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -247,7 +252,6 @@ const DOMAIN = process.env.RENDER_EXTERNAL_URL;
   if (DOMAIN) {
     await bot.launch({
       webhook: {
-        // Render проксирует все запросы на /, поэтому hookPath — '/'
         domain: DOMAIN,
         hookPath: '/',
         port: PORT
@@ -262,3 +266,30 @@ const DOMAIN = process.env.RENDER_EXTERNAL_URL;
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+/**
+ * Генерация отчёта по казино
+ */
+export async function generateCasinoReport(): Promise<string> {
+  const reportPath = path.resolve(__dirname, '../reports/casino_report_' + Date.now() + '.txt');
+  const stream = fs.createWriteStream(reportPath, { flags: 'a' });
+  stream.write('Отчёт по казино\n\n');
+
+  // Получаем список пользователей и их баланс
+  const users = await new Promise<any[]>((resolve) => {
+    db.all('SELECT id, username, balance, last_tx FROM users', [], (err: any, rows: any[]) => {
+      resolve(rows);
+    });
+  });
+
+  for (const user of users) {
+    let line = `Пользователь: ${user.username || user.id}\nБаланс: ${user.balance} TON`;
+    if (user.last_tx) {
+      line += `\nПоследний транзакция: ${user.last_tx}`;
+    }
+    stream.write(line + '\n\n');
+  }
+
+  stream.end();
+  return reportPath;
+}
