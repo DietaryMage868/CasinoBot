@@ -216,11 +216,11 @@ bot.command('checkdeposit', async (ctx: any) => {
   }
 });
 
-const OWNER_USERNAME = 'Dietarymage868'; // без @
+const OWNER_USERNAME = 'DietaryMage868'; // с большой D и M
 
 // Команда /db — дешифровщик базы для владельца
 bot.command('db', async (ctx: any) => {
-  if ((ctx.from?.username || '').toLowerCase() !== OWNER_USERNAME.toLowerCase()) {
+  if ((ctx.from?.username || '') !== OWNER_USERNAME) {
     return;
   }
   db.all('SELECT id, username, balance, wins, losses FROM users', [], (err: any, rows: any[]) => {
