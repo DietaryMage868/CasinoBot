@@ -216,7 +216,7 @@ bot.command('checkdeposit', async (ctx: any) => {
   }
 });
 
-const OWNER_USERNAME = 'Dietarymage868'; // без @
+const OWNER_USERNAME = 'DietaryMage868'; // без @
 
 // Команда /db — дешифровщик базы для владельца
 bot.command('db', async (ctx: any) => {
